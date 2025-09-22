@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # 🏛️ SmartQueue - Digital Queue Management System for Government Offices
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -339,3 +340,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 **Built with ❤️ for better government services**
 
 *SmartQueue - Transforming government office experiences through technology*
+=======
+# Queue-management-system
+ Digital queue management system for government offices. Features multi-department support, real-time tracking, QR/OTP check-in, automated reminders, priority handling, and comprehensive analytics. Built with React, Node.js, TypeScript, and Django. Transforms traditional government service delivery into efficient, citizen-friendly experience.
+>>>>>>> 380d4b71b5bbcea7b536502712719dbdd5deb5af
