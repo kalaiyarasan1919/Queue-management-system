@@ -12,12 +12,16 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { CalendarCheck, Clock, TrendingUp, BarChart3, Edit, Trash2, QrCode, Plus } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { CalendarCheck, Clock, TrendingUp, BarChart3, Edit, Trash2, QrCode, Plus, Users, Star, Shield, Zap } from "lucide-react";
+import { EnhancedCard, StatCard, QueueItem } from "@/components/EnhancedCard";
+import { LoadingSpinner, Skeleton } from "@/components/LoadingSpinner";
 import { useToast } from "@/hooks/use-toast";
 import { useLanguage } from "@/context/LanguageContext";
 import { useWebSocket } from "@/hooks/useWebSocket";
-import { LiveDisplay } from "@/components/LiveDisplay";
 import { QRCodeModal } from "@/components/QRCodeModal";
+import { SlotSelector } from "@/components/SlotSelector";
+import { AISupport } from "@/components/AISupport";
 import { apiRequest } from "@/lib/queryClient";
 import { isUnauthorizedError } from "@/lib/authUtils";
 
@@ -27,6 +31,11 @@ const bookingSchema = z.object({
   appointmentDate: z.string().min(1, "Please select a date"),
   timeSlot: z.string().min(1, "Please select a time slot"),
   priority: z.enum(["normal", "senior", "disabled", "emergency"]).default("normal"),
+  isPwd: z.boolean().default(false),
+  pwdCertificateUrl: z.string().optional().nullable(),
+  isSeniorCitizen: z.boolean().default(false),
+  ageProofUrl: z.string().optional().nullable(),
+  notificationEmail: z.string().email("Please enter a valid email address"),
 });
 
 type BookingFormData = z.infer<typeof bookingSchema>;
@@ -40,6 +49,12 @@ export default function CitizenDashboard() {
   const { lastMessage } = useWebSocket();
   const queryClient = useQueryClient();
 
+  // Get current user data
+  const { data: user } = useQuery({
+    queryKey: ['/api/auth/user'],
+    queryFn: () => apiRequest('GET', '/api/auth/user'),
+  });
+
   const form = useForm<BookingFormData>({
     resolver: zodResolver(bookingSchema),
     defaultValues: {
@@ -47,7 +62,9 @@ export default function CitizenDashboard() {
       serviceId: "",
       appointmentDate: "",
       timeSlot: "",
-      priority: "normal"
+      priority: "normal",
+      isPwd: false,
+      pwdCertificateUrl: undefined,
     }
   });
 
@@ -66,7 +83,11 @@ export default function CitizenDashboard() {
 
   const bookingMutation = useMutation({
     mutationFn: async (data: BookingFormData) => {
-      await apiRequest('POST', '/api/appointments', data);
+      const appointmentData = {
+        ...data,
+        appointmentDate: new Date(data.appointmentDate).toISOString(),
+      };
+      await apiRequest('POST', '/api/appointments', appointmentData);
     },
     onSuccess: () => {
       toast({
@@ -139,6 +160,36 @@ export default function CitizenDashboard() {
     bookingMutation.mutate(data);
   };
 
+  const handlePwdFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const formData = new FormData();
+    formData.append('certificate', file);
+    const res = await fetch('/api/uploads/pwd-certificate', {
+      method: 'POST',
+      body: formData,
+    });
+    const json = await res.json();
+    if (res.ok && json.url) {
+      form.setValue('pwdCertificateUrl', json.url);
+    }
+  };
+
+  const handleAgeProofFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const formData = new FormData();
+    formData.append('certificate', file);
+    const res = await fetch('/api/uploads/age-proof', {
+      method: 'POST',
+      body: formData,
+    });
+    const json = await res.json();
+    if (res.ok && json.url) {
+      form.setValue('ageProofUrl', json.url);
+    }
+  };
+
   const handleShowQR = (appointment: any) => {
     setSelectedAppointment(appointment);
     setQrModalOpen(true);
@@ -171,7 +222,7 @@ export default function CitizenDashboard() {
   return (
     <div className="space-y-8">
       {/* Quick Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
         <Card>
           <CardContent className="p-6">
             <div className="flex items-center justify-between">
@@ -228,21 +279,50 @@ export default function CitizenDashboard() {
             </div>
           </CardContent>
         </Card>
+
+        <Card>
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-muted-foreground text-sm">My QR Code</p>
+                <p className="text-sm font-medium">Personal ID</p>
+              </div>
+              <QrCode 
+                className="text-primary text-2xl cursor-pointer hover:text-primary/80" 
+                onClick={() => {
+                  // Show user's personal QR code
+                  const userQR = `equeue://user/${user?.id}`;
+                  setSelectedAppointment({ qrCode: userQR, tokenNumber: 'PERSONAL' });
+                  setQrModalOpen(true);
+                }}
+              />
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Booking Form */}
-        <div className="lg:col-span-2">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center">
-                <Plus className="text-primary mr-2" />
-                {t('booking.title')}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <Form {...form}>
-                <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+      <Tabs defaultValue="booking" className="w-full">
+        <TabsList className="grid w-full grid-cols-4">
+          <TabsTrigger value="booking">Book Appointment</TabsTrigger>
+          <TabsTrigger value="appointments">My Appointments</TabsTrigger>
+          <TabsTrigger value="queue">Live Queue</TabsTrigger>
+          <TabsTrigger value="support">AI Support</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="booking" className="space-y-8">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            {/* Booking Form */}
+            <div className="lg:col-span-2">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center">
+                    <Plus className="text-primary mr-2" />
+                    {t('booking.title')}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <Form {...form}>
+                    <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <FormField
                       control={form.control}
@@ -307,6 +387,50 @@ export default function CitizenDashboard() {
                     />
                   </div>
 
+                  {/* PwD Section */}
+                  <div className="space-y-3">
+                    <div className="flex items-center space-x-3">
+                      <input
+                        id="isPwd"
+                        type="checkbox"
+                        checked={form.watch('isPwd')}
+                        onChange={(e) => form.setValue('isPwd', e.target.checked)}
+                      />
+                      <Label htmlFor="isPwd">I am a person with disability (PwD)</Label>
+                    </div>
+                    {form.watch('isPwd') && (
+                      <div className="space-y-2">
+                        <Label htmlFor="pwd-cert">Upload disability certificate (PDF/image)</Label>
+                        <Input id="pwd-cert" type="file" accept=".pdf,image/*" onChange={handlePwdFile} />
+                        {form.watch('pwdCertificateUrl') && (
+                          <p className="text-xs text-muted-foreground">Certificate uploaded.</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Senior Citizen Support */}
+                  <div className="space-y-2">
+                    <div className="flex items-center space-x-2">
+                      <input
+                        id="isSeniorCitizen"
+                        type="checkbox"
+                        checked={form.watch('isSeniorCitizen')}
+                        onChange={(e) => form.setValue('isSeniorCitizen', e.target.checked)}
+                      />
+                      <Label htmlFor="isSeniorCitizen">I am a senior citizen (60+ years)</Label>
+                    </div>
+                    {form.watch('isSeniorCitizen') && (
+                      <div className="space-y-2">
+                        <Label htmlFor="age-proof">Upload age proof (Aadhaar/Driving License)</Label>
+                        <Input id="age-proof" type="file" accept=".pdf,image/*" onChange={handleAgeProofFile} />
+                        {form.watch('ageProofUrl') && (
+                          <p className="text-xs text-muted-foreground">Age proof uploaded.</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <FormField
                       control={form.control}
@@ -333,21 +457,14 @@ export default function CitizenDashboard() {
                       render={({ field }) => (
                         <FormItem>
                           <FormLabel>{t('booking.time')}</FormLabel>
-                          <Select onValueChange={field.onChange} value={field.value}>
-                            <FormControl>
-                              <SelectTrigger data-testid="select-time">
-                                <SelectValue placeholder="Select Time" />
-                              </SelectTrigger>
-                            </FormControl>
-                            <SelectContent>
-                              <SelectItem value="09:00-10:00">9:00 AM - 10:00 AM</SelectItem>
-                              <SelectItem value="10:00-11:00">10:00 AM - 11:00 AM</SelectItem>
-                              <SelectItem value="11:00-12:00">11:00 AM - 12:00 PM</SelectItem>
-                              <SelectItem value="14:00-15:00">2:00 PM - 3:00 PM</SelectItem>
-                              <SelectItem value="15:00-16:00">3:00 PM - 4:00 PM</SelectItem>
-                              <SelectItem value="16:00-17:00">4:00 PM - 5:00 PM</SelectItem>
-                            </SelectContent>
-                          </Select>
+                          <FormControl>
+                            <Input 
+                              {...field} 
+                              placeholder="Select a time slot below"
+                              readOnly
+                              data-testid="input-time"
+                            />
+                          </FormControl>
                           <FormMessage />
                         </FormItem>
                       )}
@@ -385,10 +502,40 @@ export default function CitizenDashboard() {
                     )}
                   />
 
+                  <FormField
+                    control={form.control}
+                    name="notificationEmail"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Notification Email</FormLabel>
+                        <FormControl>
+                          <Input 
+                            type="email" 
+                            placeholder="Enter email for notifications"
+                            {...field}
+                            data-testid="input-notification-email"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  {/* Slot Selector */}
+                  {selectedDepartment && form.watch('appointmentDate') && (
+                    <SlotSelector
+                      departmentId={selectedDepartment}
+                      serviceId={form.watch('serviceId')}
+                      selectedDate={form.watch('appointmentDate')}
+                      onSlotSelect={(timeSlot) => form.setValue('timeSlot', timeSlot)}
+                      selectedSlot={form.watch('timeSlot')}
+                    />
+                  )}
+
                   <Button 
                     type="submit" 
                     className="w-full" 
-                    disabled={bookingMutation.isPending}
+                    disabled={bookingMutation.isPending || !form.watch('timeSlot')}
                     data-testid="button-book-appointment"
                   >
                     {bookingMutation.isPending ? (
@@ -409,14 +556,11 @@ export default function CitizenDashboard() {
           </Card>
         </div>
 
-        {/* Live Queue Status */}
-        <div>
-          <LiveDisplay />
-        </div>
-      </div>
+          </div>
+        </TabsContent>
 
-      {/* My Appointments */}
-      <Card>
+        <TabsContent value="appointments">
+          <Card>
         <CardHeader>
           <CardTitle className="flex items-center">
             <CalendarCheck className="text-primary mr-2" />
@@ -457,6 +601,12 @@ export default function CitizenDashboard() {
                           <div className="w-8 h-8 bg-primary text-primary-foreground rounded-full flex items-center justify-center text-sm font-bold">
                             {appointment.tokenNumber}
                           </div>
+                          {appointment.isPwd && (
+                            <span title="PwD priority" className="text-xl">♿</span>
+                          )}
+                          {appointment.isSeniorCitizen && (
+                            <span title="Senior Citizen priority" className="text-xl">👴</span>
+                          )}
                           <QrCode 
                             size={16} 
                             className="text-muted-foreground cursor-pointer hover:text-primary" 
@@ -503,7 +653,32 @@ export default function CitizenDashboard() {
             </div>
           )}
         </CardContent>
-      </Card>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="queue">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center">
+                <Users className="text-primary mr-2" />
+                Live Queue Status
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-center py-8 text-muted-foreground">
+                <Users className="mx-auto h-12 w-12 text-gray-400 mb-4" />
+                <p>Live queue status will be displayed here when available.</p>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="support">
+          <Card>
+            <AISupport />
+          </Card>
+        </TabsContent>
+      </Tabs>
 
       {/* QR Code Modal */}
       {selectedAppointment && (

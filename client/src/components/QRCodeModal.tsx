@@ -1,7 +1,8 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { QrCode } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
+import { useEffect, useState } from "react";
+import QRCode from "qrcode";
 
 interface QRCodeModalProps {
   isOpen: boolean;
@@ -12,6 +13,22 @@ interface QRCodeModalProps {
 
 export function QRCodeModal({ isOpen, onClose, tokenNumber, qrCode }: QRCodeModalProps) {
   const { t } = useLanguage();
+  const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>("");
+
+  useEffect(() => {
+    if (isOpen && qrCode) {
+      QRCode.toDataURL(qrCode, {
+        width: 256,
+        margin: 2,
+        color: {
+          dark: '#000000',
+          light: '#ffffff'
+        }
+      }).then((url: string) => {
+        setQrCodeDataUrl(url);
+      });
+    }
+  }, [isOpen, qrCode]);
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -24,13 +41,19 @@ export function QRCodeModal({ isOpen, onClose, tokenNumber, qrCode }: QRCodeModa
         
         <div className="text-center">
           <div className="bg-muted p-8 rounded-lg mb-4 flex items-center justify-center">
-            {/* In a real implementation, use a QR code library like qrcode.js */}
-            <div className="w-48 h-48 bg-white border-2 border-gray-300 rounded flex items-center justify-center">
-              <div className="text-center">
-                <QrCode size={64} className="mx-auto mb-2 text-gray-400" />
-                <p className="text-xs text-gray-500">{qrCode}</p>
+            {qrCodeDataUrl ? (
+              <img 
+                src={qrCodeDataUrl} 
+                alt={`QR Code for token ${tokenNumber}`}
+                className="w-48 h-48"
+              />
+            ) : (
+              <div className="w-48 h-48 bg-white border-2 border-gray-300 rounded flex items-center justify-center">
+                <div className="text-center">
+                  <p className="text-xs text-gray-500">Generating QR Code...</p>
+                </div>
               </div>
-            </div>
+            )}
           </div>
           
           <p className="text-sm text-muted-foreground mb-4">

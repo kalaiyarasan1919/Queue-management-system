@@ -66,6 +66,8 @@ export default function AdminDashboard() {
   const [departmentDialogOpen, setDepartmentDialogOpen] = useState(false);
   const [serviceDialogOpen, setServiceDialogOpen] = useState(false);
   const [counterDialogOpen, setCounterDialogOpen] = useState(false);
+  const [selectedCountersDept, setSelectedCountersDept] = useState<string>("");
+  const [newCounterNumber, setNewCounterNumber] = useState<number>(1);
   const [announcementDialogOpen, setAnnouncementDialogOpen] = useState(false);
   const { toast } = useToast();
   const { t } = useLanguage();
@@ -115,6 +117,11 @@ export default function AdminDashboard() {
     queryKey: ['/api/users', 'clerk'],
   });
 
+  const { data: counters } = useQuery({
+    queryKey: ['/api/departments', selectedCountersDept, 'counters'],
+    enabled: !!selectedCountersDept,
+  });
+
   const { data: announcements } = useQuery({
     queryKey: ['/api/announcements'],
   });
@@ -151,6 +158,43 @@ export default function AdminDashboard() {
         variant: "destructive",
       });
     },
+  });
+
+  const createCounterMutation = useMutation({
+    mutationFn: async (data: { departmentId: string; number: number }) => {
+      await apiRequest('POST', '/api/counters', data);
+    },
+    onSuccess: () => {
+      toast({ title: 'Counter Created', description: 'New counter added' });
+      setNewCounterNumber(1);
+      queryClient.invalidateQueries({ queryKey: ['/api/departments', selectedCountersDept, 'counters'] });
+    },
+    onError: (error) => {
+      if (isUnauthorizedError(error)) {
+        toast({ title: 'Unauthorized', description: t('msg.unauthorized'), variant: 'destructive' });
+        setTimeout(() => { window.location.href = '/api/login'; }, 500);
+        return;
+      }
+      toast({ title: 'Error', description: 'Failed to create counter', variant: 'destructive' });
+    }
+  });
+
+  const assignClerkMutation = useMutation({
+    mutationFn: async (payload: { counterId: string; clerkId: string | null }) => {
+      await apiRequest('PATCH', `/api/counters/${payload.counterId}`, { clerkId: payload.clerkId });
+    },
+    onSuccess: () => {
+      toast({ title: 'Updated', description: 'Counter assignment updated' });
+      queryClient.invalidateQueries({ queryKey: ['/api/departments', selectedCountersDept, 'counters'] });
+    },
+    onError: (error) => {
+      if (isUnauthorizedError(error)) {
+        toast({ title: 'Unauthorized', description: t('msg.unauthorized'), variant: 'destructive' });
+        setTimeout(() => { window.location.href = '/api/login'; }, 500);
+        return;
+      }
+      toast({ title: 'Error', description: 'Failed to update counter', variant: 'destructive' });
+    }
   });
 
   const createServiceMutation = useMutation({
@@ -318,10 +362,11 @@ export default function AdminDashboard() {
 
       {/* Management Tabs */}
       <Tabs value={selectedTab} onValueChange={setSelectedTab}>
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="grid w-full grid-cols-5">
           <TabsTrigger value="overview" data-testid="tab-overview">Overview</TabsTrigger>
           <TabsTrigger value="departments" data-testid="tab-departments">Departments</TabsTrigger>
           <TabsTrigger value="services" data-testid="tab-services">Services</TabsTrigger>
+          <TabsTrigger value="counters" data-testid="tab-counters">Counters</TabsTrigger>
           <TabsTrigger value="announcements" data-testid="tab-announcements">Announcements</TabsTrigger>
         </TabsList>
 
@@ -406,6 +451,121 @@ export default function AdminDashboard() {
                   <p>Queue Analytics Chart</p>
                   <p className="text-sm">Real-time data visualization</p>
                 </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* CSV Export */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Export Analytics</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-end space-x-3">
+                <div>
+                  <label className="block text-sm mb-1">Date</label>
+                  <Input type="date" id="export-date" defaultValue={new Date().toISOString().split('T')[0]} />
+                </div>
+                <Button
+                  onClick={() => {
+                    const el = document.getElementById('export-date') as HTMLInputElement | null;
+                    const date = el?.value || new Date().toISOString().split('T')[0];
+                    window.open(`/api/analytics/export?date=${date}`, '_blank');
+                  }}
+                  data-testid="button-export-csv"
+                >
+                  Export CSV
+                </Button>
+                <Button variant="outline" disabled title="Coming soon" data-testid="button-export-pdf">Export PDF</Button>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="counters" className="space-y-6">
+          <div className="flex justify-between items-center">
+            <h2 className="text-2xl font-bold">Counters Management</h2>
+          </div>
+          <Card>
+            <CardContent className="p-6 space-y-4">
+              <div className="grid md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm mb-1">Department</label>
+                  <Select value={selectedCountersDept} onValueChange={setSelectedCountersDept}>
+                    <FormControl>
+                      <SelectTrigger data-testid="select-counters-department">
+                        <SelectValue placeholder="Select Department" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {departments?.map((dept: any) => (
+                        <SelectItem key={dept.id} value={dept.id}>{dept.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="block text-sm mb-1">New Counter Number</label>
+                  <Input type="number" value={newCounterNumber} onChange={(e) => setNewCounterNumber(parseInt(e.target.value || '0'))} data-testid="input-counter-number" />
+                </div>
+                <div className="flex items-end">
+                  <Button 
+                    onClick={() => createCounterMutation.mutate({ departmentId: selectedCountersDept, number: newCounterNumber })}
+                    disabled={!selectedCountersDept || createCounterMutation.isPending}
+                    data-testid="button-create-counter"
+                  >
+                    {createCounterMutation.isPending ? 'Creating...' : 'Create Counter'}
+                  </Button>
+                </div>
+              </div>
+
+              <div className="mt-6">
+                {selectedCountersDept ? (
+                  counters?.length ? (
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>#</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead>Assigned Clerk</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {counters?.map((ctr: any) => (
+                            <TableRow key={ctr.id} data-testid={`row-counter-${ctr.id}`}>
+                              <TableCell>{ctr.number}</TableCell>
+                              <TableCell>
+                                <Badge className={ctr.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}>
+                                  {ctr.status}
+                                </Badge>
+                              </TableCell>
+                              <TableCell>
+                                <Select value={ctr.clerkId || ''} onValueChange={(val) => assignClerkMutation.mutate({ counterId: ctr.id, clerkId: val || null })}>
+                                  <FormControl>
+                                    <SelectTrigger data-testid={`select-counter-clerk-${ctr.id}`}>
+                                      <SelectValue placeholder="Assign Clerk" />
+                                    </SelectTrigger>
+                                  </FormControl>
+                                  <SelectContent>
+                                    <SelectItem value="">Unassigned</SelectItem>
+                                    {clerks?.map((u: any) => (
+                                      <SelectItem key={u.id} value={u.id}>{u.firstName || u.email}</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  ) : (
+                    <div className="text-muted-foreground">No counters found for this department.</div>
+                  )
+                ) : (
+                  <div className="text-muted-foreground">Select a department to view counters.</div>
+                )}
               </div>
             </CardContent>
           </Card>

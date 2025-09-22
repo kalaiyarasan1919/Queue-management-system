@@ -3,35 +3,100 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Headphones, Play, Pause, X, Check, Coffee, Power, UserPlus, AlertTriangle, BarChart3 } from "lucide-react";
+import { Headphones, Play, Pause, X, Check, Coffee, Power, UserPlus, AlertTriangle, BarChart3, QrCode } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useAuth } from "@/hooks/useAuth";
 import { apiRequest } from "@/lib/queryClient";
-import { isUnauthorizedError } from "@/lib/authUtils";
+import { QRCodeScanner } from "@/components/QRCodeScanner";
+import { Counter, Appointment, TokenValidationResponse } from "@/types/clerk";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+ 
 
 export default function ClerkInterface() {
-  const [currentAppointment, setCurrentAppointment] = useState<any>(null);
+  const [currentAppointment, setCurrentAppointment] = useState<Appointment | null>(null);
+  const [walkinOpen, setWalkinOpen] = useState(false);
+  const [walkinServiceId, setWalkinServiceId] = useState<string>("");
+  const [walkinPriority, setWalkinPriority] = useState<string>("emergency");
   const { toast } = useToast();
   const { lastMessage } = useWebSocket();
   const { user } = useAuth();
   const queryClient = useQueryClient();
 
   // Get clerk's assigned counter
-  const { data: counter } = useQuery({
-    queryKey: ['/api/counters', user?.id],
+  const { data: counter } = useQuery<Counter>({
+    queryKey: ['/api/counters/by-clerk', user?.id],
     enabled: !!user?.id,
   });
 
+  const markNoShowMutation = useMutation({
+    mutationFn: async () => {
+      if (!currentAppointment?.id) return;
+      return await apiRequest('POST', `/api/appointments/${currentAppointment.id}/no-show`);
+    },
+    onSuccess: () => {
+      toast({
+        title: 'Marked Absent',
+        description: 'Token marked as no-show and queue updated',
+      });
+      setCurrentAppointment(null);
+      queryClient.invalidateQueries({ queryKey: ['/api/departments', counter?.departmentId, 'queue'] });
+    },
+    onError: (error: any) => {
+      if (error?.response?.status === 401) {
+        toast({
+          title: 'Unauthorized',
+          description: 'You are logged out. Logging in again...',
+          variant: 'destructive',
+        });
+        setTimeout(() => { window.location.href = '/api/login'; }, 500);
+        return;
+      }
+      toast({ title: 'Error', description: 'Failed to mark absent', variant: 'destructive' });
+    }
+  });
+
+  const createWalkinMutation = useMutation({
+    mutationFn: async () => {
+      if (!counter?.departmentId || !walkinServiceId) throw new Error('Missing inputs');
+      return await apiRequest('POST', `/api/departments/${counter.departmentId}/walkin`, {
+        serviceId: walkinServiceId,
+        priority: walkinPriority,
+      });
+    },
+    onSuccess: () => {
+      toast({ title: 'Walk-in Added', description: 'Emergency token inserted' });
+      setWalkinOpen(false);
+      setWalkinServiceId("");
+      setWalkinPriority('emergency');
+      queryClient.invalidateQueries({ queryKey: ['/api/departments', counter?.departmentId, 'queue'] });
+    },
+    onError: (error: any) => {
+      if (error?.response?.status === 401) {
+        toast({ title: 'Unauthorized', description: 'You are logged out. Logging in again...', variant: 'destructive' });
+        setTimeout(() => { window.location.href = '/api/login'; }, 500);
+        return;
+      }
+      toast({ title: 'Error', description: 'Failed to add walk-in', variant: 'destructive' });
+    }
+  });
+
   // Get current queue for the department
-  const { data: queue, isLoading: queueLoading } = useQuery({
+  const { data: queue, isLoading: queueLoading } = useQuery<Appointment[]>({
     queryKey: ['/api/departments', counter?.departmentId, 'queue'],
+    enabled: !!counter?.departmentId,
+  });
+
+  // Load services for the counter's department (for walk-in)
+  const { data: services } = useQuery<any[]>({
+    queryKey: ['/api/departments', counter?.departmentId, 'services'],
     enabled: !!counter?.departmentId,
   });
 
   const callNextMutation = useMutation({
     mutationFn: async () => {
-      return await apiRequest('POST', `/api/counters/${counter?.id}/call-next`);
+      if (!counter?.id) throw new Error('Counter not assigned');
+      return await apiRequest<Appointment>('POST', `/api/counters/${counter.id}/call-next`);
     },
     onSuccess: (response) => {
       setCurrentAppointment(response);
@@ -41,8 +106,8 @@ export default function ClerkInterface() {
       });
       queryClient.invalidateQueries({ queryKey: ['/api/departments', counter?.departmentId, 'queue'] });
     },
-    onError: (error) => {
-      if (isUnauthorizedError(error)) {
+    onError: (error: any) => {
+      if (error?.response?.status === 401) {
         toast({
           title: "Unauthorized",
           description: "You are logged out. Logging in again...",
@@ -76,8 +141,8 @@ export default function ClerkInterface() {
       setCurrentAppointment(null);
       queryClient.invalidateQueries({ queryKey: ['/api/departments', counter?.departmentId, 'queue'] });
     },
-    onError: (error) => {
-      if (isUnauthorizedError(error)) {
+    onError: (error: any) => {
+      if (error?.response?.status === 401) {
         toast({
           title: "Unauthorized",
           description: "You are logged out. Logging in again...",
@@ -107,8 +172,8 @@ export default function ClerkInterface() {
       });
       queryClient.invalidateQueries({ queryKey: ['/api/counters', user?.id] });
     },
-    onError: (error) => {
-      if (isUnauthorizedError(error)) {
+    onError: (error: any) => {
+      if (error?.response?.status === 401) {
         toast({
           title: "Unauthorized",
           description: "You are logged out. Logging in again...",
@@ -127,13 +192,35 @@ export default function ClerkInterface() {
     },
   });
 
-  // Listen for real-time updates
+  // Handle WebSocket messages
   useEffect(() => {
-    if (lastMessage?.type === 'QUEUE_UPDATE' && lastMessage?.data?.counterId === counter?.id) {
+    if (lastMessage?.type === 'QUEUE_UPDATE') {
       setCurrentAppointment(lastMessage.data.currentServing);
-      queryClient.invalidateQueries({ queryKey: ['/api/departments', counter?.departmentId, 'queue'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/departments', lastMessage.data.departmentId, 'queue'] });
     }
-  }, [lastMessage, counter?.id, counter?.departmentId, queryClient]);
+  }, [lastMessage, queryClient]);
+
+  // QR scanner handler
+  const handleTokenScan = async (tokenId: string): Promise<{ valid: boolean; appointment?: Appointment }> => {
+    try {
+      const response = await apiRequest<TokenValidationResponse>('POST', `/api/tokens/validate`, { tokenId });
+      if (response.valid && response.appointment) {
+        setCurrentAppointment(response.appointment);
+        toast({
+          title: "Token Valid",
+          description: `Token ${tokenId} is valid and ready for service`,
+        });
+      }
+      return { valid: response.valid, appointment: response.appointment };
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to validate token",
+        variant: "destructive",
+      });
+      return { valid: false };
+    }
+  };
 
   const handleCallNext = () => {
     callNextMutation.mutate();
@@ -152,11 +239,7 @@ export default function ClerkInterface() {
   };
 
   const handleMarkAbsent = () => {
-    // Implementation for marking customer as absent
-    toast({
-      title: "Feature Coming Soon",
-      description: "Mark absent functionality will be available soon",
-    });
+    markNoShowMutation.mutate();
   };
 
   const getCounterStatusColor = (status: string) => {
@@ -189,9 +272,21 @@ export default function ClerkInterface() {
   }
 
   return (
+    <>
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-      {/* Current Service */}
       <div className="lg:col-span-2">
+        <Card className="mb-4">
+          <CardHeader>
+            <CardTitle className="flex items-center">
+              <QrCode className="mr-2" />
+              Token Scanner
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <QRCodeScanner onScan={handleTokenScan} />
+          </CardContent>
+        </Card>
+        
         <Card className="mb-8">
           <CardHeader>
             <CardTitle className="flex items-center">
@@ -311,7 +406,7 @@ export default function ClerkInterface() {
               </div>
             ) : (
               <div className="space-y-3">
-                {queue?.slice(0, 5).map((appointment: any, index: number) => (
+                {queue?.slice(0, 5).map((appointment: Appointment, index: number) => (
                   <div 
                     key={appointment.id} 
                     className={`flex items-center justify-between p-3 border border-border rounded-md ${getPriorityColor(appointment.priority)}`}
@@ -426,6 +521,7 @@ export default function ClerkInterface() {
               <Button 
                 variant="outline"
                 className="w-full justify-start"
+                onClick={() => setWalkinOpen(true)}
                 data-testid="button-add-walkin"
               >
                 <UserPlus className="mr-2" size={16} />
@@ -454,5 +550,51 @@ export default function ClerkInterface() {
         </Card>
       </div>
     </div>
+
+    {/* Walk-in Modal */}
+    <Dialog open={walkinOpen} onOpenChange={setWalkinOpen}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Add Walk-in</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm mb-1">Service</label>
+            <select
+              className="w-full border rounded p-2"
+              value={walkinServiceId}
+              onChange={(e) => setWalkinServiceId(e.target.value)}
+              data-testid="select-walkin-service"
+            >
+              <option value="">Select Service</option>
+              {services?.map((s: any) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm mb-1">Priority</label>
+            <select
+              className="w-full border rounded p-2"
+              value={walkinPriority}
+              onChange={(e) => setWalkinPriority(e.target.value)}
+              data-testid="select-walkin-priority"
+            >
+              <option value="emergency">Emergency</option>
+              <option value="senior">Senior</option>
+              <option value="disabled">Disabled</option>
+              <option value="normal">Normal</option>
+            </select>
+          </div>
+          <div className="flex space-x-2">
+            <Button onClick={() => createWalkinMutation.mutate()} disabled={createWalkinMutation.isPending}>
+              {createWalkinMutation.isPending ? 'Adding...' : 'Add Walk-in'}
+            </Button>
+            <Button variant="outline" onClick={() => setWalkinOpen(false)}>Cancel</Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 }

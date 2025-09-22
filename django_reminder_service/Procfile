@@ -1,0 +1,3 @@
+web: gunicorn reminder_service.wsgi:application --bind 0.0.0.0:$PORT
+worker: celery -A reminder_service worker --loglevel=info
+beat: celery -A reminder_service beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler

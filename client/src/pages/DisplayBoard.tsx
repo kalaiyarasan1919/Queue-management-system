@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useWebSocket } from "@/hooks/useWebSocket";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueries } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { format } from "date-fns";
 import { Play, Clock, Megaphone } from "lucide-react";
@@ -9,11 +9,11 @@ export default function DisplayBoard() {
   const [currentTime, setCurrentTime] = useState(new Date());
   const { lastMessage } = useWebSocket();
 
-  const { data: departments } = useQuery({
+  const { data: departments } = useQuery<any[]>({
     queryKey: ['/api/departments'],
   });
 
-  const { data: announcements } = useQuery({
+  const { data: announcements } = useQuery<any[]>({
     queryKey: ['/api/announcements'],
   });
 
@@ -24,67 +24,45 @@ export default function DisplayBoard() {
 
     return () => clearInterval(timer);
   }, []);
+  // Load queues for each department
+  const deptList: any[] = Array.isArray(departments) ? (departments as any[]) : [];
+  const queueQueries = useQueries({
+    queries: deptList.map((dept: any) => ({
+      queryKey: ['/api/departments', dept.id, 'queue'],
+      refetchInterval: 5000,
+      refetchOnWindowFocus: false,
+      staleTime: 0,
+    })),
+  });
 
-  // Mock currently serving data - in real implementation, this would come from WebSocket updates
-  const currentlyServing = [
-    {
-      tokenNumber: "A47",
-      departmentName: "RTO Services",
-      serviceName: "DL Renewal",
-      counterNumber: 3,
-      startTime: "3:42 PM"
-    },
-    {
-      tokenNumber: "B23",
-      departmentName: "Income Certificate",
-      serviceName: "New Application",
-      counterNumber: 1,
-      startTime: "3:40 PM"
-    },
-    {
-      tokenNumber: "C15",
-      departmentName: "Aadhar Services",
-      serviceName: "Update Details",
-      counterNumber: 2,
-      startTime: "3:38 PM"
-    }
-  ];
-
-  // Mock queue status data
-  const queueStatus = [
-    {
-      departmentName: "RTO Services",
-      status: "Active",
-      nextToken: "A48",
-      inQueue: 42,
-      estWait: "18m",
-      statusColor: "bg-green-600"
-    },
-    {
-      departmentName: "Income Certificate",
-      status: "Active", 
-      nextToken: "B24",
-      inQueue: 15,
-      estWait: "12m",
-      statusColor: "bg-green-600"
-    },
-    {
-      departmentName: "Aadhar Services",
-      status: "Limited",
-      nextToken: "C16", 
-      inQueue: 8,
-      estWait: "25m",
-      statusColor: "bg-yellow-600"
-    },
-    {
-      departmentName: "Municipal Corp",
-      status: "Break",
-      nextToken: "D05",
-      inQueue: 3,
-      estWait: "4:00 PM",
-      statusColor: "bg-red-600"
-    }
-  ];
+  // Build computed views
+  const { currentlyServing, queueStatus } = useMemo(() => {
+    const serving: Array<{ tokenNumber: string; departmentName: string; startTime?: string }> = [];
+    const status: Array<{ departmentName: string; status: string; nextToken: string; inQueue: number; estWait: string; statusColor: string }> = [];
+    const qResults: any[] = (queueQueries as any[]) || [];
+    deptList.forEach((dept: any, idx: number) => {
+      const q: any[] = (qResults[idx]?.data as any[]) || [];
+      const servingAppt = q.find(a => a.status === 'serving');
+      if (servingAppt) {
+        serving.push({
+          tokenNumber: servingAppt.tokenNumber,
+          departmentName: dept.name,
+          startTime: servingAppt.actualStartTime ? new Date(servingAppt.actualStartTime).toLocaleTimeString() : undefined,
+        });
+      }
+      const nextWaiting = q.find(a => a.status === 'waiting' || a.status === 'confirmed');
+      status.push({
+        departmentName: dept.name,
+        status: 'Active',
+        nextToken: nextWaiting?.tokenNumber || '- -',
+        inQueue: q.length,
+        estWait: typeof nextWaiting?.estimatedWaitTime === 'number' ? `${nextWaiting.estimatedWaitTime}m` : '0m',
+        statusColor: 'bg-green-600',
+      });
+    });
+    // show up to 3 serving tokens
+    return { currentlyServing: serving.slice(0, 3), queueStatus: status };
+  }, [deptList, queueQueries]);
 
   return (
     <div className="bg-black text-white min-h-screen p-8" data-testid="display-board">
@@ -127,25 +105,14 @@ export default function DisplayBoard() {
                     }`}>
                       {service.departmentName}
                     </div>
-                    <div className={`text-lg ${
-                      index === 0 ? 'text-green-200' : 
-                      index === 1 ? 'text-blue-200' : 'text-purple-200'
-                    }`}>
-                      Counter {service.counterNumber}
-                    </div>
+                    
                   </div>
                   <div className="text-right">
-                    <div className={`text-2xl ${
-                      index === 0 ? 'text-green-100' : 
-                      index === 1 ? 'text-blue-100' : 'text-purple-100'
-                    }`}>
-                      {service.serviceName}
-                    </div>
                     <div className={`text-lg ${
                       index === 0 ? 'text-green-200' : 
                       index === 1 ? 'text-blue-200' : 'text-purple-200'
                     }`}>
-                      Started: {service.startTime}
+                      Started: {service.startTime || '-'}
                     </div>
                   </div>
                 </div>

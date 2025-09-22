@@ -1,4 +1,5 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
+import axios, { AxiosError, AxiosResponse } from 'axios';
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
@@ -7,20 +8,33 @@ async function throwIfResNotOk(res: Response) {
   }
 }
 
-export async function apiRequest(
-  method: string,
+export async function apiRequest<T = any>(
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   url: string,
-  data?: unknown | undefined,
-): Promise<Response> {
-  const res = await fetch(url, {
-    method,
-    headers: data ? { "Content-Type": "application/json" } : {},
-    body: data ? JSON.stringify(data) : undefined,
-    credentials: "include",
-  });
-
-  await throwIfResNotOk(res);
-  return res;
+  data?: any,
+  headers?: Record<string, string>
+): Promise<T> {
+  try {
+    const base = (import.meta as any)?.env?.VITE_API_BASE_URL || '';
+    const response: AxiosResponse<T> = await axios({
+      method,
+      url: `${base}${url}`,
+      data,
+      headers: {
+        ...headers,
+      },
+      // Use cookies for auth (server uses session)
+      withCredentials: true,
+    });
+    
+    return response.data;
+  } catch (error) {
+    if ((error as AxiosError).response?.status === 401) {
+      // Handle unauthorized error
+      throw error;
+    }
+    throw error;
+  }
 }
 
 type UnauthorizedBehavior = "returnNull" | "throw";

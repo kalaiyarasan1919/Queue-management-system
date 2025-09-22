@@ -9,10 +9,16 @@ export default function Home() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-          <p>Loading...</p>
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-purple-50">
+        <div className="text-center animate-fade-in-scale">
+          <div className="relative">
+            <div className="animate-spin rounded-full h-16 w-16 border-4 border-blue-200 mx-auto mb-6"></div>
+            <div className="animate-spin rounded-full h-16 w-16 border-4 border-transparent border-t-blue-600 absolute top-0 left-0"></div>
+          </div>
+          <div className="space-y-2">
+            <h3 className="text-lg font-semibold text-gray-900">Loading eQueue 2.0</h3>
+            <p className="text-gray-600">Preparing your dashboard...</p>
+          </div>
         </div>
       </div>
     );
@@ -23,13 +29,15 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
       <Navigation />
       
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {user.role === 'citizen' && <CitizenDashboard />}
-        {user.role === 'clerk' && <ClerkInterface />}
-        {user.role === 'admin' && <AdminDashboard />}
+        <div className="animate-slide-in-up">
+          {user.role === 'citizen' && <CitizenDashboard />}
+          {user.role === 'clerk' && <ClerkInterface />}
+          {user.role === 'admin' && <AdminDashboard />}
+        </div>
       </main>
     </div>
   );
